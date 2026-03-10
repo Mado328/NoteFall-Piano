@@ -31,13 +31,6 @@ def get_window_rect() -> Optional[tuple[int, int, int, int]]:
 
 
 def restore_pygame_focus() -> None:
-    """
-    Bring the pygame window to the foreground and give it keyboard/mouse focus.
-
-    On Windows the standard SetForegroundWindow + SetFocus approach is used so
-    that the *very first* click registers as an action rather than merely
-    activating the window.  Falls back to the SDL2 API on other platforms.
-    """
     # ── Windows: ctypes approach ──────────────────────────────────────────────
     try:
         import ctypes

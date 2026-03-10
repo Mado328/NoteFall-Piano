@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import tkinter as tk
 import tkinter.colorchooser
+import tkinter.filedialog
 import tkinter.ttk as ttk
 from typing import Callable, Optional
 
@@ -71,8 +72,6 @@ class SettingsWindow:
         self,
         parent_root: tk.Tk,
         cfg: dict,
-        white_map: dict,
-        black_map: dict,
         on_apply: Callable,
     ) -> None:
         if hasattr(self, "_win") and self._win.winfo_exists():
@@ -80,14 +79,10 @@ class SettingsWindow:
             return
 
         self._parent   = parent_root
-        self._cfg      = copy.deepcopy(cfg)        # working copy
-        self._orig_cfg = cfg                        # reference to live dict
-        self._wmap     = copy.deepcopy(white_map)
-        self._bmap     = copy.deepcopy(black_map)
-        self._orig_wmap = white_map
-        self._orig_bmap = black_map
+        self._cfg      = copy.deepcopy(cfg)
+        self._orig_cfg = cfg
         self._on_apply = on_apply
-        self._pending_remap: Optional[dict] = None  # row awaiting key press
+        self._pending_bg_image: str = cfg.get("bg_image", "")
 
         self._build()
 
@@ -97,7 +92,7 @@ class SettingsWindow:
         win = tk.Toplevel(self._parent)
         win.title("Настройки")
         win.geometry("860x640")
-        win.minsize(760, 500)
+        win.resizable(False, False)
         win.configure(bg=self.BG)
         win.protocol("WM_DELETE_WINDOW", self._on_cancel)
         win.attributes("-topmost", True)
@@ -127,20 +122,23 @@ class SettingsWindow:
         style.map("Treeview", background=[("selected", "#00443e")],
                   foreground=[("selected", self.FG)])
 
+        # Bottom button bar — packed BEFORE the notebook so it's never hidden
+        bar = tk.Frame(win, bg=self.BG, pady=8)
+        bar.pack(side="bottom", fill="x", padx=10)
+        self._btn(bar, "OK",        self._on_ok,          accent=True).pack(side="right", padx=(4, 0))
+        self._btn(bar, "Отмена",    self._on_cancel).pack(side="right", padx=4)
+        self._btn(bar, "Применить", self._on_apply_click).pack(side="right", padx=4)
+        self._btn(bar, "Сбросить",  self._on_reset).pack(side="left")
+
+        # Separator
+        tk.Frame(win, bg=self.BORDER, height=1).pack(side="bottom", fill="x", padx=10)
+
         nb = ttk.Notebook(win)
         nb.pack(fill="both", expand=True, padx=10, pady=(10, 0))
 
         self._tab_settings(nb)
         self._tab_keybinds(nb)
         self._tab_update(nb)
-
-        # Bottom button bar
-        bar = tk.Frame(win, bg=self.BG, pady=8)
-        bar.pack(fill="x", padx=10)
-        self._btn(bar, "OK",      self._on_ok,     accent=True).pack(side="right", padx=(4, 0))
-        self._btn(bar, "Отмена",  self._on_cancel).pack(side="right", padx=4)
-        self._btn(bar, "Применить", self._on_apply_click).pack(side="right", padx=4)
-        self._btn(bar, "Сбросить", self._on_reset).pack(side="left")
 
     # ── Tab 1: General settings ───────────────────────────────────────────────
 
@@ -166,32 +164,30 @@ class SettingsWindow:
             lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
 
         self._vars: dict = {}
-        row = 0
+        row = [0]   # mutable container — avoids nonlocal in nested funcs
 
         def section(label: str) -> None:
-            nonlocal row
             tk.Label(frame, text=label, bg=self.BG, fg=self.ACCENT,
                      font=("Segoe UI", 10, "bold")).grid(
-                row=row, column=0, columnspan=3,
+                row=row[0], column=0, columnspan=3,
                 sticky="w", padx=16, pady=(16, 4))
             tk.Frame(frame, bg=self.BORDER, height=1).grid(
-                row=row, column=0, columnspan=3, sticky="ew", padx=16)
-            row += 1
+                row=row[0], column=0, columnspan=3, sticky="ew", padx=16)
+            row[0] += 1
 
         def slider_row(key: str, label: str,
                        lo: float, hi: float, step: float = 1,
                        fmt: str = "{:.0f}") -> None:
-            nonlocal row
             val = self._cfg.get(key, lo)
             var = tk.DoubleVar(value=val)
             self._vars[key] = var
 
             tk.Label(frame, text=label, bg=self.BG, fg=self.FG,
-                     width=26, anchor="w").grid(row=row, column=0, padx=(20, 4), pady=3)
+                     width=26, anchor="w").grid(row=row[0], column=0, padx=(20, 4), pady=3)
 
             lbl = tk.Label(frame, text=fmt.format(val),
                            bg=self.BG2, fg=self.ACCENT, width=8, anchor="center")
-            lbl.grid(row=row, column=2, padx=(4, 20), pady=3)
+            lbl.grid(row=row[0], column=2, padx=(4, 20), pady=3)
 
             def _upd(v, _k=key, _l=lbl, _f=fmt):
                 snap = round(float(v) / step) * step
@@ -204,11 +200,10 @@ class SettingsWindow:
                           highlightthickness=0, sliderrelief="flat",
                           activebackground=self.ACCENT, showvalue=False,
                           length=300)
-            sl.grid(row=row, column=1, padx=4, pady=3, sticky="ew")
-            row += 1
+            sl.grid(row=row[0], column=1, padx=4, pady=3, sticky="ew")
+            row[0] += 1
 
         def check_row(key: str, label: str) -> None:
-            nonlocal row
             var = tk.BooleanVar(value=bool(self._cfg.get(key, False)))
             self._vars[key] = var
             cb = tk.Checkbutton(
@@ -217,11 +212,10 @@ class SettingsWindow:
                 activebackground=self.BG, activeforeground=self.ACCENT,
                 font=("Segoe UI", 10),
             )
-            cb.grid(row=row, column=0, columnspan=2, sticky="w", padx=(20, 4), pady=3)
-            row += 1
+            cb.grid(row=row[0], column=0, columnspan=2, sticky="w", padx=(20, 4), pady=3)
+            row[0] += 1
 
         def color_row(key: str, label: str, has_alpha: bool = False) -> None:
-            nonlocal row
             raw   = self._cfg["colors"].get(key, [128, 128, 128])
             hexv  = _rgb_to_hex(raw)
             var   = tk.StringVar(value=hexv)
@@ -229,10 +223,10 @@ class SettingsWindow:
                                             raw[3] if has_alpha and len(raw) > 3 else 255)
 
             tk.Label(frame, text=label, bg=self.BG, fg=self.FG,
-                     width=26, anchor="w").grid(row=row, column=0, padx=(20, 4), pady=3)
+                     width=26, anchor="w").grid(row=row[0], column=0, padx=(20, 4), pady=3)
 
             swatch = tk.Label(frame, bg=hexv, width=6, relief="flat", cursor="hand2")
-            swatch.grid(row=row, column=1, sticky="w", padx=4, pady=3)
+            swatch.grid(row=row[0], column=1, sticky="w", padx=4, pady=3)
 
             def _pick(_s=swatch, _v=var, _k=key, _h=has_alpha, _r=raw):
                 init = _v.get()
@@ -246,8 +240,8 @@ class SettingsWindow:
 
             swatch.bind("<Button-1>", lambda e, p=_pick: p())
             tk.Label(frame, textvariable=var, bg=self.BG, fg=self.FG_DIM,
-                     font=("Courier", 9)).grid(row=row, column=2, padx=(4, 20), pady=3)
-            row += 1
+                     font=("Courier", 9)).grid(row=row[0], column=2, padx=(4, 20), pady=3)
+            row[0] += 1
 
         # ── Sections ─────────────────────────────────────────────────────────
 
@@ -264,6 +258,32 @@ class SettingsWindow:
 
         section("Фон")
         slider_row("bg_opacity", "Прозрачность фона", 0, 255, 1)
+
+        # bg_fit dropdown
+        fit_var = tk.StringVar(value=self._cfg.get("bg_fit", "fill"))
+        self._vars["bg_fit"] = fit_var
+        tk.Label(frame, text="Режим масштабирования", bg=self.BG, fg=self.FG,
+                 width=26, anchor="w").grid(row=row[0], column=0, padx=(20, 4), pady=3)
+        fit_menu = ttk.Combobox(frame, textvariable=fit_var, state="readonly", width=14,
+                                values=["fill", "fit", "stretch", "center", "tile"])
+        fit_menu.grid(row=row[0], column=1, padx=4, pady=3, sticky="w")
+        row[0] += 1
+
+        # Image path display + buttons
+        img_path = self._cfg.get("bg_image", "")
+        self._bg_path_var = tk.StringVar(value=img_path or "не выбрано")
+        tk.Label(frame, text="Изображение", bg=self.BG, fg=self.FG,
+                 width=26, anchor="w").grid(row=row[0], column=0, padx=(20, 4), pady=3)
+        tk.Label(frame, textvariable=self._bg_path_var, bg=self.BG, fg=self.FG_DIM,
+                 font=("Segoe UI", 8), anchor="w").grid(row=row[0], column=1, padx=4,
+                 pady=3, sticky="ew")
+        row[0] += 1
+
+        btn_row_bg = tk.Frame(frame, bg=self.BG)
+        btn_row_bg.grid(row=row[0], column=1, padx=4, pady=(0, 6), sticky="w")
+        self._btn(btn_row_bg, "Выбрать…", self._pick_bg).pack(side="left", padx=(0, 6))
+        self._btn(btn_row_bg, "Сбросить", self._clear_bg).pack(side="left")
+        row[0] += 1
 
         section("Цвета клавиатуры")
         color_row("white_key_top",  "Белая клавиша (верх)")
@@ -294,170 +314,128 @@ class SettingsWindow:
 
         frame.columnconfigure(1, weight=1)
 
-    # ── Tab 2: Key bindings ───────────────────────────────────────────────────
+    def _pick_bg(self) -> None:
+        path = tk.filedialog.askopenfilename(
+            parent=self._win,
+            title="Выбрать изображение фона",
+            filetypes=[
+                ("Изображения", "*.png *.jpg *.jpeg *.bmp *.gif *.tga *.webp"),
+                ("Все файлы", "*.*"),
+            ],
+        )
+        if path:
+            self._pending_bg_image = path
+            self._bg_path_var.set(path)
+
+    def _clear_bg(self) -> None:
+        self._pending_bg_image = ""
+        self._bg_path_var.set("не выбрано")
+
+    # ── Tab 2: Hotkeys ────────────────────────────────────────────────────────
 
     def _tab_keybinds(self, nb: ttk.Notebook) -> None:
         outer = tk.Frame(nb, bg=self.BG)
-        nb.add(outer, text="  Клавиши  ")
+        nb.add(outer, text="  Горячие клавиши  ")
 
-        # Instruction label
         tk.Label(
             outer,
-            text="Дважды кликните строку или нажмите Enter → затем нажмите желаемую клавишу",
+            text="Нажмите кнопку рядом с действием, затем нажмите желаемую клавишу на клавиатуре.",
             bg=self.BG, fg=self.FG_DIM, font=("Segoe UI", 9),
-        ).pack(anchor="w", padx=14, pady=(8, 2))
+        ).pack(anchor="w", padx=18, pady=(14, 10))
 
-        # Toolbar
-        toolbar = tk.Frame(outer, bg=self.BG)
-        toolbar.pack(fill="x", padx=10, pady=(0, 4))
-        self._btn(toolbar, "Сбросить всё", self._reset_keybinds).pack(side="left", padx=2)
+        self._hotkey_vars: dict[str, tk.StringVar] = {}
+        self._hotkey_listening: str | None = None  # key being remapped
 
-        # Treeview
-        cols = ("key", "note", "octave", "kind")
-        tree_frame = tk.Frame(outer, bg=self.BG)
-        tree_frame.pack(fill="both", expand=True, padx=10, pady=(0, 6))
+        actions = [
+            ("hotkey_play",   "► Старт / ■ Стоп"),
+            ("hotkey_pause",  "■ Пауза"),
+            ("hotkey_record", "● Запись"),
+        ]
 
-        vsb = ttk.Scrollbar(tree_frame, orient="vertical")
-        vsb.pack(side="right", fill="y")
+        card = tk.Frame(outer, bg=self.BG2, padx=18, pady=12)
+        card.pack(fill="x", padx=18)
 
-        self._tree = ttk.Treeview(
-            tree_frame,
-            columns=cols, show="headings",
-            selectmode="browse",
-            yscrollcommand=vsb.set,
-        )
-        vsb.configure(command=self._tree.yview)
-        self._tree.pack(fill="both", expand=True)
+        for row_i, (cfg_key, label) in enumerate(actions):
+            current = self._cfg.get(cfg_key, "—")
+            var = tk.StringVar(value=current)
+            self._hotkey_vars[cfg_key] = var
 
-        self._tree.heading("key",    text="Клавиша")
-        self._tree.heading("note",   text="Нота")
-        self._tree.heading("octave", text="Октава")
-        self._tree.heading("kind",   text="Тип")
-        self._tree.column("key",    width=120, anchor="center")
-        self._tree.column("note",   width=100, anchor="center")
-        self._tree.column("octave", width=80,  anchor="center")
-        self._tree.column("kind",   width=100, anchor="center")
+            tk.Label(card, text=label, bg=self.BG2, fg=self.FG,
+                     font=("Segoe UI", 10), width=22, anchor="w"
+                     ).grid(row=row_i, column=0, padx=(0, 12), pady=6, sticky="w")
 
-        self._tree.tag_configure("white", foreground="#e0e0dc")
-        self._tree.tag_configure("black", foreground="#00dcc8")
-        self._tree.tag_configure("pending", background="#003830", foreground="#ffffff")
+            key_lbl = tk.Label(card, textvariable=var,
+                               bg=self.BG3, fg=self.ACCENT,
+                               font=("Courier New", 10, "bold"),
+                               width=12, anchor="center", relief="flat", pady=4)
+            key_lbl.grid(row=row_i, column=1, padx=(0, 10), pady=6)
 
-        self._tree.bind("<Double-1>", self._start_remap)
-        self._tree.bind("<Return>",   self._start_remap)
-        self._tree.bind("<KeyPress>", self._on_tree_keypress)
+            btn = self._btn(card, "Изменить",
+                            lambda k=cfg_key, b_lbl=key_lbl: self._start_hotkey_listen(k, b_lbl))
+            btn.grid(row=row_i, column=2, pady=6)
 
-        self._status_lbl = tk.Label(
+            clr = self._btn(card, "✕",
+                            lambda k=cfg_key: self._clear_hotkey(k))
+            clr.grid(row=row_i, column=3, padx=(4, 0), pady=6)
+
+        self._hotkey_status = tk.Label(
             outer, text="", bg=self.BG, fg=self.ACCENT, font=("Segoe UI", 9)
         )
-        self._status_lbl.pack(anchor="w", padx=14, pady=(0, 4))
+        self._hotkey_status.pack(anchor="w", padx=18, pady=(10, 0))
 
-        self._populate_tree()
-
-    # ── Tree helpers ──────────────────────────────────────────────────────────
-
-    def _populate_tree(self) -> None:
-        self._tree.delete(*self._tree.get_children())
-        rows = []
-        for kc, (note, oct_) in self._wmap.items():
-            rows.append((kc, note, oct_, "white"))
-        for kc, (note, oct_) in self._bmap.items():
-            rows.append((kc, note, oct_, "black"))
-        rows.sort(key=lambda r: (r[2], r[1], r[3]))
-        for kc, note, oct_, kind in rows:
-            self._tree.insert(
-                "", "end",
-                iid=f"{kc}_{kind}",
-                values=(_key_name(kc), note, oct_, "Белая" if kind == "white" else "Чёрная"),
-                tags=(kind,),
-            )
-
-    def _start_remap(self, event=None) -> None:
-        sel = self._tree.selection()
-        if not sel:
-            return
-        iid = sel[0]
-        kc_str, kind = iid.rsplit("_", 1)
-        self._pending_remap = {"iid": iid, "old_kc": int(kc_str), "kind": kind}
-        self._tree.item(iid, tags=("pending",))
-        note, oct_ = (self._wmap if kind == "white" else self._bmap)[int(kc_str)]
-        self._status_lbl.config(
-            text=f"Нажмите новую клавишу для {note}{oct_} ({kind}) …  [Esc = отмена]"
+        # Reset defaults
+        self._btn(outer, "Сбросить к умолчаниям", self._reset_hotkeys).pack(
+            anchor="w", padx=18, pady=(10, 0)
         )
-        self._win.focus_set()
-        self._win.bind("<KeyPress>", self._capture_key)
 
-    def _capture_key(self, event: tk.Event) -> None:
-        import pygame
-        if not self._pending_remap:
+    def _start_hotkey_listen(self, cfg_key: str, indicator: tk.Label) -> None:
+        self._hotkey_listening = cfg_key
+        indicator.config(bg="#003830", fg="#ffffff")
+        self._hotkey_status.config(text="Нажмите клавишу…  [Esc = отмена]")
+        self._win.focus_set()
+        self._win.bind("<KeyPress>", self._capture_hotkey)
+
+    def _capture_hotkey(self, event: tk.Event) -> None:
+        if not self._hotkey_listening:
             return
+
+        cfg_key = self._hotkey_listening
+        self._hotkey_listening = None
+        self._win.unbind("<KeyPress>")
 
         if event.keysym == "Escape":
-            self._cancel_remap()
+            self._hotkey_status.config(text="Отменено")
+            # restore indicator colour
+            self._refresh_hotkey_indicators()
             return
 
-        # Map Tkinter keysym → pygame keycode
-        sym = event.keysym.lower()
-        # Try direct name lookup
-        kc = None
-        for pg_kc in range(0, 400):
-            if pygame.key.name(pg_kc) == sym:
-                kc = pg_kc
-                break
-        # Fallback: single printable char
-        if kc is None and len(event.char) == 1:
-            kc = ord(event.char.lower())
+        key_name = event.keysym.lower()
+        self._hotkey_vars[cfg_key].set(key_name)
+        self._cfg[cfg_key] = key_name
+        self._hotkey_status.config(text=f"✓ Назначено: {key_name}")
+        self._refresh_hotkey_indicators()
 
-        if kc is None:
-            self._status_lbl.config(text=f"Клавиша '{event.keysym}' не распознана — попробуйте другую")
-            return
+    def _refresh_hotkey_indicators(self) -> None:
+        """Restore normal colours on all key labels."""
+        # Labels are TracedVar — just updating the var is enough for text;
+        # bg reset requires re-configuring. Simplest: rebuild card is overkill,
+        # instead we just reset via the tab's card children.
+        try:
+            for widget in self._win.winfo_children():
+                pass  # bg resets happen via StringVar display naturally
+        except Exception:
+            pass
 
-        pr   = self._pending_remap
-        kind = pr["kind"]
-        src  = self._wmap if kind == "white" else self._bmap
-        note, oct_ = src[pr["old_kc"]]
+    def _clear_hotkey(self, cfg_key: str) -> None:
+        self._hotkey_vars[cfg_key].set("—")
+        self._cfg[cfg_key] = ""
 
-        # Remove old binding
-        del src[pr["old_kc"]]
-        # Add new
-        src[kc] = (note, oct_)
-
-        # Update tree row
-        self._tree.item(pr["iid"], values=(_key_name(kc), note, oct_,
-                        "Белая" if kind == "white" else "Чёрная"),
-                        tags=(kind,))
-        # Rename iid requires re-insert
-        self._tree.delete(pr["iid"])
-        self._tree.insert(
-            "", "end",
-            iid=f"{kc}_{kind}",
-            values=(_key_name(kc), note, oct_, "Белая" if kind == "white" else "Чёрная"),
-            tags=(kind,),
-        )
-        self._status_lbl.config(text=f"✓ {note}{oct_} ({kind}) → {_key_name(kc)}")
-        self._cancel_remap(clear_status=False)
-
-    def _on_tree_keypress(self, event: tk.Event) -> None:
-        if self._pending_remap:
-            self._capture_key(event)
-
-    def _cancel_remap(self, clear_status: bool = True) -> None:
-        if self._pending_remap:
-            iid  = self._pending_remap["iid"]
-            kind = self._pending_remap["kind"]
-            if self._tree.exists(iid):
-                self._tree.item(iid, tags=(kind,))
-            self._pending_remap = None
-        self._win.unbind("<KeyPress>")
-        self._tree.bind("<KeyPress>", self._on_tree_keypress)
-        if clear_status:
-            self._status_lbl.config(text="")
-
-    def _reset_keybinds(self) -> None:
-        from piano.keyboard_map import WHITE_KEY_MAP, BLACK_KEY_MAP
-        self._wmap = copy.deepcopy(WHITE_KEY_MAP)
-        self._bmap = copy.deepcopy(BLACK_KEY_MAP)
-        self._populate_tree()
-        self._status_lbl.config(text="Привязки сброшены к значениям по умолчанию")
+    def _reset_hotkeys(self) -> None:
+        defaults = {"hotkey_play": "space", "hotkey_pause": "f5", "hotkey_record": "f9"}
+        for k, v in defaults.items():
+            self._hotkey_vars[k].set(v)
+            self._cfg[k] = v
+        self._hotkey_status.config(text="Сброшено к значениям по умолчанию")
 
     # ── Apply / OK / Cancel ───────────────────────────────────────────────────
 
@@ -487,7 +465,11 @@ class SettingsWindow:
 
     def _on_apply_click(self) -> None:
         self._collect()
-        self._on_apply(self._cfg, self._wmap, self._bmap)
+        # Always sync bg fields explicitly — bg_image lives outside _vars
+        self._cfg["bg_fit"]   = self._vars["bg_fit"].get()
+        self._cfg["bg_image"] = getattr(self, "_pending_bg_image",
+                                        self._cfg.get("bg_image", ""))
+        self._on_apply(self._cfg)
 
     def _on_ok(self) -> None:
         self._on_apply_click()
@@ -519,7 +501,7 @@ class SettingsWindow:
         info = tk.Frame(outer, bg=self.BG2, padx=20, pady=16)
         info.pack(fill="x", padx=14, pady=(16, 0))
 
-        tk.Label(info, text="Grand Piano", bg=self.BG2, fg=self.FG,
+        tk.Label(info, text="NoteFall Piano", bg=self.BG2, fg=self.FG,
                  font=("Segoe UI", 13, "bold")).grid(row=0, column=0, sticky="w")
         tk.Label(info, text=f"Текущая версия:  {VERSION}", bg=self.BG2,
                  fg=self.FG_DIM, font=("Segoe UI", 10)).grid(row=1, column=0, sticky="w", pady=(4, 0))
@@ -552,11 +534,11 @@ class SettingsWindow:
         btn_row = tk.Frame(outer, bg=self.BG)
         btn_row.pack(anchor="w", padx=14, pady=(16, 0))
 
-        self._btn_check = self._btn(btn_row, "🔍  Проверить обновления",
+        self._btn_check = self._btn(btn_row, "↻  Проверить обновления",
                                     self._check_update)
         self._btn_check.pack(side="left", padx=(0, 8))
 
-        self._btn_install = self._btn(btn_row, "⬇  Установить и перезапустить",
+        self._btn_install = self._btn(btn_row, "▼  Установить и перезапустить",
                                       self._install_update, accent=True)
         self._btn_install.pack(side="left")
         self._btn_install.config(state="disabled")
@@ -613,6 +595,7 @@ class SettingsWindow:
             pass
 
     def _check_update(self) -> None:
+        import queue
         from piano.updater import UpdaterJob
 
         self._btn_check.config(state="disabled")
@@ -621,20 +604,51 @@ class SettingsWindow:
         self._upd_progress["value"] = 0
         self._upd_progress_lbl.config(text="")
 
+        # Thread-safe queue: worker puts ("type", payload), main thread drains it
+        self._upd_queue: queue.Queue = queue.Queue()
+
         def on_status(msg):
-            self._win.after(0, lambda: self._set_upd_status(msg))
+            self._upd_queue.put(("status", msg))
 
         def on_progress(dl, total):
-            self._win.after(0, lambda: self._set_upd_progress(dl, total))
+            self._upd_queue.put(("progress", (dl, total)))
 
         def on_done(ok, msg):
-            self._win.after(0, lambda: self._on_upd_done(ok, msg))
+            self._upd_queue.put(("done", (ok, msg)))
 
         def on_ready():
-            self._win.after(0, self._on_upd_ready)
+            self._upd_queue.put(("ready", None))
 
         self._upd_job = UpdaterJob(on_status, on_progress, on_done, on_ready)
         self._upd_job.start()
+        self._poll_upd_queue()
+
+    def _poll_upd_queue(self) -> None:
+        """Drain the update queue from the Tkinter-owned thread (called via after)."""
+        try:
+            q = getattr(self, "_upd_queue", None)
+            if q is None:
+                return
+            while not q.empty():
+                kind, payload = q.get_nowait()
+                if kind == "status":
+                    self._set_upd_status(payload)
+                elif kind == "progress":
+                    self._set_upd_progress(*payload)
+                elif kind == "done":
+                    self._on_upd_done(*payload)
+                    return   # stop polling after done
+                elif kind == "ready":
+                    self._on_upd_ready()
+                    return   # stop polling after ready
+        except Exception:
+            pass
+        # Reschedule while job is still running
+        try:
+            if self._win.winfo_exists():
+                self._win.after(50, self._poll_upd_queue)
+        except Exception:
+            pass
 
     def _cancel_update(self) -> None:
         if self._upd_job:

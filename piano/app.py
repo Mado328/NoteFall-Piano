@@ -51,7 +51,7 @@ ROLL_MIN_H = 420
 
 class Application:
     """
-    Grand Piano application lifecycle manager.
+    NoteFall Piano application lifecycle manager.
 
     Instantiate once, then call :meth:`run`. All mutable state lives here
     as typed instance attributes instead of closure cells.
@@ -88,8 +88,8 @@ class Application:
         # Notes reach it only when explicitly selected as OUTPUT.
         # Writing is done via the teVirtualMIDI DLL directly (not PortMidi),
         # which is the only reliable method on Windows.
-        vport_name        = self._cfg.get("virtual_port_name", "Grand Piano")
-        viport_name       = self._cfg.get("virtual_input_port_name", "Grand Piano IN")
+        vport_name        = self._cfg.get("virtual_port_name", "NoteFall Piano")
+        viport_name       = self._cfg.get("virtual_input_port_name", "NoteFall Piano IN")
         self.virtual_port  = VirtualMidiPort()
         self.virtual_iport = VirtualMidiInput()
 
@@ -99,10 +99,10 @@ class Application:
         self.midi_out.set_virtual_port(vport_name, self.virtual_port)
 
         # ── Fonts ────────────────────────────────────────────────────────
-        self.font_ui    = self._load_font(["Segoe UI", "Ubuntu", "Noto Sans"], 15)
-        self.font_sm    = self._load_font(["Segoe UI", "Ubuntu", "Noto Sans"], 13)
-        self.font_note  = self._load_font(["Segoe UI", "Ubuntu"], 11)
-        self.font_oct   = self._load_font(["Segoe UI", "Ubuntu"], 10)
+        self.font_ui    = pygame.font.SysFont("Segoe UI", 15) or pygame.font.Font(None, 15)
+        self.font_sm    = pygame.font.SysFont("Segoe UI", 13) or pygame.font.Font(None, 13)
+        self.font_note  = pygame.font.SysFont("Segoe UI", 11) or pygame.font.Font(None, 11)
+        self.font_oct   = pygame.font.SysFont("Segoe UI", 10) or pygame.font.Font(None, 10)
 
         # ── Renderer / roll ──────────────────────────────────────────────
         self.renderer    = PianoRenderer(self.piano_cfg, self.theme)
@@ -117,7 +117,7 @@ class Application:
 
         # INPUT list: our virtual input port first, then real hardware ports.
         # Exclude:
-        #   - the virtual OUTPUT port ("Grand Piano") — prevents feedback loop
+        #   - the virtual OUTPUT port ("NoteFall Piano") — prevents feedback loop
         #   - the system-visible name of the virtual INPUT port — it appears in
         #     mido.get_input_names() but we control it via DLL, not mido
         real_inputs = [
@@ -144,12 +144,19 @@ class Application:
         self._panel_pinned:  bool  = self._cfg.get("panel_pinned", True)
         self._panel_visible: bool  = True   # logical target state
 
+        # Action hotkeys (pygame key constants, resolved from key names)
+        self._hotkey_play   = self._resolve_hotkey(self._cfg.get("hotkey_play",   "space"))
+        self._hotkey_pause  = self._resolve_hotkey(self._cfg.get("hotkey_pause",  "f5"))
+        self._hotkey_record = self._resolve_hotkey(self._cfg.get("hotkey_record", "f9"))
+
         # Background image state
         self._bg_raw:     Optional[pygame.Surface] = None  # original loaded pixels
         self._bg_scaled:  Optional[pygame.Surface] = None  # scaled to current size
         self._bg_path:    str  = self._cfg.get("bg_image", "")
         self._bg_fit:     str  = self._cfg.get("bg_fit", "fill")
         self._bg_opacity: int  = self._cfg.get("bg_opacity", 255)
+        self._bg_fit:     str  = self._cfg.get("bg_fit", "fill")
+        self._bg_fit_applied: str = ""   # fit mode that _bg_scaled was built with
         if self._bg_path:
             self._bg_raw = load_bg_image(self._bg_path)
         self.clock = pygame.time.Clock()
@@ -163,21 +170,14 @@ class Application:
         self.btn_pause:  Optional[FlatButton]    = None
         self.btn_mute:   Optional[FlatButton]    = None
         self.btn_record: Optional[FlatButton]    = None
-        self.btn_bg:       Optional[FlatButton]  = None
         self.btn_pin:      Optional[FlatButton]  = None
         self.btn_settings: Optional[FlatButton]  = None
         self._settings_win: Optional[object]     = None  # SettingsWindow instance
 
         # Cached render surfaces for dynamic labels
-        self._rec_lbl_cache: Optional[tuple]    = None
-        self._fn_surf_cache:  Optional[tuple]   = None
-
-        # Static label surfaces (pre-rendered once)
-        th = self.theme
-        self.surf_out_lbl = self.font_sm.render("OUTPUT",    True, th.cyan_dim)
-        self.surf_inp_lbl = self.font_sm.render("INPUT",     True, th.cyan_dim)
-        self.surf_scl_lbl = self.font_sm.render("МАСШТАБ",   True, th.cyan_dim)
-        self.surf_fle_lbl = self.font_sm.render("MIDI ФАЙЛ", True, th.cyan_dim)
+        self._rec_lbl_cache:    Optional[tuple] = None
+        self._fn_surf_cache:    Optional[tuple] = None
+        self._static_lbl_cache: Optional[tuple] = None  # (cyan_dim_color, surfs…)
 
         # Tkinter root — initialised once; repeated Tk() calls are expensive
         self._tk_root = tkinter.Tk()
@@ -218,7 +218,7 @@ class Application:
                 (cfg["window_width"], cfg["window_height"]), pygame.RESIZABLE
             )
         os.environ.pop("SDL_VIDEO_WINDOW_POS", None)
-        pygame.display.set_caption("Grand Piano")
+        pygame.display.set_caption("NoteFall Piano")
 
     # ── Layout helpers ────────────────────────────────────────────────────────
 
@@ -280,8 +280,7 @@ class Application:
         bpa_x, bpa_w = bp_x + bp_w + 4,        90
         bm_x, bm_w  = bpa_x + bpa_w + 4,       80
         br_x, br_w  = bm_x + bm_w + 10,        90
-        bbg_x, bbg_w = br_x + br_w + 10,       80
-        bst_x, bst_w = bbg_x + bbg_w + 6,      90
+        bst_x, bst_w = br_x + br_w + 10,      90
 
         self.port_sel  = PortSelector(ps_x, wy, ps_w, wh, self.port_list,
                                       self.font_ui, self.font_sm, th)
@@ -306,15 +305,8 @@ class Application:
                                      self.font_sm, th, color_active=(200, 40, 40))
         self.btn_record.active = self.recorder.is_recording
 
-        bg_label = "СБРОС ФОНА" if self._bg_raw is not None else "ФОН..."
-        self.btn_bg = FlatButton(
-            pygame.Rect(bbg_x, wy, bbg_w, wh), bg_label,
-            self.font_sm, th, color_active=(60, 100, 160),
-        )
-        self.btn_bg.active = self._bg_raw is not None
-
         self.btn_settings = FlatButton(
-            pygame.Rect(bst_x, wy, bst_w, wh), "⚙ НАСТРОЙКИ",
+            pygame.Rect(bst_x, wy, bst_w, wh), "= НАСТРОЙКИ",
             self.font_sm, th,
         )
 
@@ -323,7 +315,7 @@ class Application:
         sw_cur = pygame.display.get_surface().get_width()
         self.btn_pin = FlatButton(
             pygame.Rect(sw_cur - pin_sz - 4, 4, pin_sz, pin_sz),
-            "📌", self.font_sm, th, color_active=(200, 160, 0),
+            "[*]" if self._panel_pinned else "[ ]", self.font_sm, th, color_active=(200, 160, 0),
         )
         self.btn_pin.active = self._panel_pinned
 
@@ -453,7 +445,7 @@ class Application:
         """Yield all non-None panel widgets for uniform hover handling."""
         for w in (self.port_sel, self.iport_sel, self.ctrl_scale,
                   self.btn_load, self.btn_play, self.btn_pause,
-                  self.btn_mute, self.btn_record, self.btn_bg,
+                  self.btn_mute, self.btn_record,
                   self.btn_settings, self.btn_pin):
             if w is not None:
                 yield w
@@ -496,8 +488,6 @@ class Application:
             self._toggle_mute()
         if self.btn_record and self.btn_record.rect.collidepoint(event.pos):
             self._toggle_record()
-        if self.btn_bg and self.btn_bg.rect.collidepoint(event.pos):
-            self._pick_bg_image()
         if self.btn_settings and self.btn_settings.rect.collidepoint(event.pos):
             self._open_settings()
         if self.btn_pin and self.btn_pin.rect.collidepoint(event.pos):
@@ -523,10 +513,29 @@ class Application:
 
     # ── Keyboard handler ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _resolve_hotkey(name: str) -> int:
+        """Convert a key name string (e.g. 'space', 'f5') to a pygame key constant."""
+        k = pygame.key.key_code(name) if hasattr(pygame.key, "key_code") else 0
+        if k:
+            return k
+        # Fallback: scan attributes
+        attr = "K_" + name.upper()
+        return getattr(pygame, attr, 0)
+
     def _handle_keydown(self, event: pygame.event.Event) -> None:
         if event.key == pygame.K_F11:
             self._toggle_fullscreen()
             return
+
+        # Action hotkeys (only when no modifier, to avoid clashing with piano keys)
+        if not (event.mod & (pygame.KMOD_SHIFT | pygame.KMOD_CTRL | pygame.KMOD_ALT)):
+            if self._hotkey_play   and event.key == self._hotkey_play:
+                self._toggle_playback(); return
+            if self._hotkey_pause  and event.key == self._hotkey_pause:
+                self._toggle_pause();    return
+            if self._hotkey_record and event.key == self._hotkey_record:
+                self._toggle_record();   return
 
         shift  = bool(event.mod & pygame.KMOD_SHIFT)
         km     = BLACK_KEY_MAP if shift else WHITE_KEY_MAP
@@ -601,8 +610,6 @@ class Application:
             self._settings_win = SettingsWindow(
                 parent_root=self._tk_root,
                 cfg=self._cfg,
-                white_map=WHITE_KEY_MAP,
-                black_map=BLACK_KEY_MAP,
                 on_apply=self._apply_settings,
             )
             self._tk_root.update()
@@ -611,18 +618,14 @@ class Application:
             traceback.print_exc()
             print(f"[Settings] failed to open: {exc}")
 
-    def _apply_settings(self, new_cfg: dict, new_wmap: dict, new_bmap: dict) -> None:
+    def _apply_settings(self, new_cfg: dict) -> None:
         """Callback invoked by SettingsWindow when the user clicks Apply/OK."""
-        WHITE_KEY_MAP.clear()
-        WHITE_KEY_MAP.update(new_wmap)
-        BLACK_KEY_MAP.clear()
-        BLACK_KEY_MAP.update(new_bmap)
-
         needs_rebuild = (
             new_cfg.get("scale")             != self._cfg.get("scale") or
             new_cfg.get("number_of_octaves") != self._cfg.get("number_of_octaves")
         )
-        needs_theme = new_cfg.get("colors") != self._cfg.get("colors")
+        # Compare colors BEFORE merging — deep copy ensures independence
+        needs_theme = new_cfg.get("colors", {}) != self._cfg.get("colors", {})
 
         self._cfg.update(new_cfg)
         self._cfg["colors"].update(new_cfg.get("colors", {}))
@@ -631,12 +634,40 @@ class Application:
         self.roll_speed     = self._cfg.get("roll_speed", 220)
         self.note_roll.speed = self.roll_speed
         self.fps            = int(self._cfg.get("fps", 60))
-        self._bg_opacity    = int(self._cfg.get("bg_opacity", 255))
-        self.bg_cache       = None
+        old_opacity = self._bg_opacity
+        old_fit     = self._bg_fit
 
-        if needs_theme:
-            self.theme    = ColorTheme(self._cfg["colors"])
-            self.bg_cache = None
+        self._bg_opacity    = int(self._cfg.get("bg_opacity", 255))
+        self._bg_fit        = self._cfg.get("bg_fit", "fill")
+
+        if old_opacity != self._bg_opacity or old_fit != self._bg_fit:
+            self._bg_scaled = None   # force rescale/redraw
+            self.bg_cache   = None
+        else:
+            self._bg_scaled = None
+            self.bg_cache   = None
+
+        # Background image — reload if path changed
+        new_bg_path = self._cfg.get("bg_image", "")
+        if new_bg_path != self._bg_path:
+            self._bg_path   = new_bg_path
+            self._bg_raw    = load_bg_image(self._bg_path) if self._bg_path else None
+            if self._bg_raw is not None:
+                try:
+                    self._bg_raw = self._bg_raw.convert()
+                except Exception:
+                    pass
+            self._bg_scaled = None
+
+        # Hotkeys
+        self._hotkey_play   = self._resolve_hotkey(self._cfg.get("hotkey_play",   "space"))
+        self._hotkey_pause  = self._resolve_hotkey(self._cfg.get("hotkey_pause",  "f5"))
+        self._hotkey_record = self._resolve_hotkey(self._cfg.get("hotkey_record", "f9"))
+
+        # Always rebuild theme so colour changes appear immediately
+        self.theme = ColorTheme.from_config(self._cfg["colors"])
+        self._apply_theme(self.theme)
+        self.bg_cache = None
 
         if needs_rebuild:
             self.piano_cfg.scale             = float(self._cfg["scale"])
@@ -646,12 +677,38 @@ class Application:
         save_config(self._cfg)
         restore_pygame_focus()
 
+    def _apply_theme(self, th: "ColorTheme") -> None:
+        """Push a new theme to every object that caches it."""
+        # Renderers
+        self.renderer.theme      = th
+        self.note_roll.theme     = th
+        self.playback_roll.theme = th
+        # Panel widgets (may be None before first _create_widgets call)
+        for w in (
+            self.port_sel, self.iport_sel, self.ctrl_scale,
+            self.btn_load, self.btn_play, self.btn_pause,
+            self.btn_mute, self.btn_record,
+            self.btn_settings, self.btn_pin,
+        ):
+            if w is not None:
+                w.theme = th
+        # Invalidate renderer surface caches so keys redraw with new colours
+        if hasattr(self.renderer, "_grad_cache"):
+            self.renderer._grad_cache.clear()
+        if hasattr(self.renderer, "_hl_cache"):
+            self.renderer._hl_cache.clear()
+        # Invalidate all label caches so they repaint with new colours immediately
+        self._static_lbl_cache = None
+        self._rec_lbl_cache    = None
+        self._fn_surf_cache    = None
+
     def _toggle_panel_pin(self) -> None:
         self._panel_pinned = not self._panel_pinned
         self._cfg["panel_pinned"] = self._panel_pinned
         save_config(self._cfg)
         if self.btn_pin:
             self.btn_pin.active = self._panel_pinned
+            self.btn_pin.label  = "[*]" if self._panel_pinned else "[ ]"
 
     def _toggle_mute(self) -> None:
         self.is_muted = not self.is_muted
@@ -867,15 +924,17 @@ class Application:
 
         # Background (cached until window size changes or image changes)
         if self.bg_cache is None or self.bg_cache.get_size() != (sw, sh):
-            # Re-scale image if size changed or not yet scaled
             if self._bg_raw is not None:
-                if (self._bg_scaled is None or
-                        self._bg_scaled.get_size() != (sw, sh)):
-                    self._bg_scaled = scale_bg_image(
+                if (self._bg_scaled is None
+                        or self._bg_scaled.get_size() != (sw, sh)
+                        or self._bg_fit_applied != self._bg_fit):
+                    self._bg_scaled      = scale_bg_image(
                         self._bg_raw, sw, sh, self._bg_fit
                     )
+                    self._bg_fit_applied = self._bg_fit
             else:
-                self._bg_scaled = None
+                self._bg_scaled      = None
+                self._bg_fit_applied = ""
 
             bg = pygame.Surface((sw, sh))
             draw_background_image(
@@ -934,15 +993,29 @@ class Application:
         pygame.draw.line(panel_surf, th.chassis_border, (0, PANEL_H - 3), (sw, PANEL_H - 3), 1)
         pygame.draw.line(panel_surf, th.cyan,           (0, PANEL_H - 1), (sw, PANEL_H - 1), 2)
 
-        # Dynamic "ЗАПИСЬ" label (cached by recording state)
+        # Static labels — rebuilt whenever cyan_dim colour changes
+        if (self._static_lbl_cache is None
+                or self._static_lbl_cache[0] != th.cyan_dim):
+            self._static_lbl_cache = (
+                th.cyan_dim,
+                self.font_sm.render("OUTPUT",    True, th.cyan_dim),
+                self.font_sm.render("INPUT",     True, th.cyan_dim),
+                self.font_sm.render("МАСШТАБ",   True, th.cyan_dim),
+                self.font_sm.render("MIDI ФАЙЛ", True, th.cyan_dim),
+            )
+        _, surf_out_lbl, surf_inp_lbl, surf_scl_lbl, surf_fle_lbl = self._static_lbl_cache
+
+        # Dynamic "ЗАПИСЬ" label (cached by recording state + colour)
         rec_state = self.recorder.is_recording
-        if self._rec_lbl_cache is None or self._rec_lbl_cache[0] != rec_state:
+        if (self._rec_lbl_cache is None
+                or self._rec_lbl_cache[0] != rec_state
+                or self._rec_lbl_cache[2] != th.cyan_dim):
             color = (200, 40, 40) if rec_state else th.cyan_dim
-            self._rec_lbl_cache = (rec_state, self.font_sm.render("ЗАПИСЬ", True, color))
+            self._rec_lbl_cache = (rec_state, self.font_sm.render("ЗАПИСЬ", True, color), th.cyan_dim)
         surf_rec = self._rec_lbl_cache[1]
 
-        # Dynamic filename label (cached by label + playing state)
-        fn_key = (self.file_label, self.file_player.is_playing)
+        # Dynamic filename label (cached by label + playing state + colour)
+        fn_key = (self.file_label, self.file_player.is_playing, th.cyan, th.cyan_dim)
         if self._fn_surf_cache is None or self._fn_surf_cache[0] != fn_key:
             color = th.cyan if self.file_player.is_playing else th.cyan_dim
             self._fn_surf_cache = (fn_key, self.font_sm.render(self.file_label, True, color))
@@ -952,14 +1025,14 @@ class Application:
         sc = self.ctrl_scale.rect; bl = self.btn_load.rect
         bp = self.btn_play.rect;  br = self.btn_record.rect
 
-        panel_surf.blit(self.surf_out_lbl,
-                        self.surf_out_lbl.get_rect(centerx=ps.centerx, bottom=ps.y - 2))
-        panel_surf.blit(self.surf_inp_lbl,
-                        self.surf_inp_lbl.get_rect(centerx=ip.centerx, bottom=ip.y - 2))
-        panel_surf.blit(self.surf_scl_lbl,
-                        self.surf_scl_lbl.get_rect(centerx=sc.centerx, bottom=sc.y - 2))
-        panel_surf.blit(self.surf_fle_lbl,
-                        self.surf_fle_lbl.get_rect(
+        panel_surf.blit(surf_out_lbl,
+                        surf_out_lbl.get_rect(centerx=ps.centerx, bottom=ps.y - 2))
+        panel_surf.blit(surf_inp_lbl,
+                        surf_inp_lbl.get_rect(centerx=ip.centerx, bottom=ip.y - 2))
+        panel_surf.blit(surf_scl_lbl,
+                        surf_scl_lbl.get_rect(centerx=sc.centerx, bottom=sc.y - 2))
+        panel_surf.blit(surf_fle_lbl,
+                        surf_fle_lbl.get_rect(
                             centerx=(bl.centerx + bp.centerx) // 2, bottom=bl.y - 2))
         panel_surf.blit(surf_rec,
                         surf_rec.get_rect(centerx=br.centerx, bottom=br.y - 2))
@@ -1040,13 +1113,3 @@ class Application:
         pygame.quit()
 
     # ── Font helper ───────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _load_font(names: list[str], size: int) -> pygame.font.Font:
-        """Try each font name in order, fall back to the pygame default."""
-        for name in names + [None]:
-            try:
-                return pygame.font.SysFont(name, size)
-            except Exception:
-                pass
-        return pygame.font.Font(None, size)

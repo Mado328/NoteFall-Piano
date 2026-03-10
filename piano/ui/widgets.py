@@ -25,10 +25,9 @@ _WIDGET_LABEL_FONT: Optional[pygame.font.Font] = None
 
 
 def _label_font() -> pygame.font.Font:
-    """Return (and lazily initialise) the small widget-label font."""
     global _WIDGET_LABEL_FONT
     if _WIDGET_LABEL_FONT is None:
-        _WIDGET_LABEL_FONT = pygame.font.Font(None, 15)
+        _WIDGET_LABEL_FONT = pygame.font.SysFont("Segoe UI", 12) or pygame.font.Font(None, 15)
     return _WIDGET_LABEL_FONT
 
 
@@ -116,7 +115,7 @@ class PortSelector:
         self.ports = ports
         self.idx   = 0
         self.font  = font
-        self.theme = theme
+        self._theme = theme
         br = h // 2 - 4
         self.bl = IconButton(x + br + 5,     y + h // 2, br, "◄", font_sm, theme)
         self.br = IconButton(x + w - br - 5, y + h // 2, br, "►", font_sm, theme)
@@ -125,6 +124,16 @@ class PortSelector:
     def current(self) -> str:
         """The currently selected port name, or ``'—'`` if the list is empty."""
         return self.ports[self.idx] if self.ports else "—"
+
+    @property
+    def theme(self) -> ColorTheme:
+        return self._theme
+
+    @theme.setter
+    def theme(self, value: ColorTheme) -> None:
+        self._theme = value
+        self.bl.theme = value
+        self.br.theme = value
 
     def handle(self, event: pygame.event.Event) -> bool:
         """Step left/right and return ``True`` when the selection changed."""
@@ -195,10 +204,20 @@ class ValueControl:
         self.step  = step
         self.fmt   = fmt
         self.font  = font
-        self.theme = theme
+        self._theme = theme
         br = h // 2 - 4
         self.bd = IconButton(x + br + 5,     y + h // 2, br, "−", font_sm, theme)
         self.bu = IconButton(x + w - br - 5, y + h // 2, br, "+", font_sm, theme)
+
+    @property
+    def theme(self) -> ColorTheme:
+        return self._theme
+
+    @theme.setter
+    def theme(self, value: ColorTheme) -> None:
+        self._theme = value
+        self.bd.theme = value
+        self.bu.theme = value
 
     def handle(self, event: pygame.event.Event) -> bool:
         """Adjust the value and return ``True`` when it changed."""

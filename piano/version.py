@@ -1,6 +1,3 @@
-"""Application version — single source of truth."""
-
-VERSION = "1.0.0"
-
-# GitHub repository in "owner/repo" format
-GITHUB_REPO = "your-username/grand-piano"
+"""Application version."""
+VERSION = "1.0.1"
+GITHUB_REPO = "Mado328/NoteFall-Piano"

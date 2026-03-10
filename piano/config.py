@@ -33,14 +33,18 @@ _DEFAULTS: dict = {
     "fps":                60,
     "fullscreen":         False,
     "asio_mode":          False,
-    "virtual_port_name":  "Grand Piano",
-    "virtual_input_port_name": "Grand Piano IN",
+    "virtual_port_name":  "NoteFall Piano",
+    "virtual_input_port_name": "NoteFall Piano IN",
     # Background image
     # "bg_image": "path/to/image.png",  ← set this key to use an image
     "bg_image":           "",           # empty = use solid colour
     "bg_fit":             "fill",       # "fill" | "fit" | "stretch" | "center" | "tile"
     "bg_opacity":         255,          # 0-255, 255 = fully opaque
     "panel_pinned":       True,         # False = auto-hide panel
+    # Action hotkeys — pygame key names (e.g. "space", "f5", "return")
+    "hotkey_play":        "f5",
+    "hotkey_pause":       "f6",
+    "hotkey_record":      "f9",
     # Colour overrides (RGB lists); merged on top of ColorTheme defaults
     "colors": {
         "chassis":          [38,  38,  40],
