@@ -13,6 +13,8 @@ NoteFall-Piano is an open-source Windows application for visualizing pressed pia
 
 The visualization works intuitively: notes scroll downward toward the keyboard, where the horizontal position of each block corresponds to its pitch on the piano, and the vertical length of the block represents note duration. This creates a clear visual mapping that helps pianists understand piece structure and timing at a glance.
 
+<img width="1920" height="1080" alt="Снимок экрана 2026-03-12 150433" src="https://github.com/user-attachments/assets/5b5f32a7-5bed-48a5-8d6e-03ab839056d1" />
+
 ## Features
 
 - **MIDI File Playback** — Load and play MIDI files with real-time visual note tracking
@@ -21,6 +23,8 @@ The visualization works intuitively: notes scroll downward toward the keyboard, 
 - **Recording Capability** — Record your MIDI performances for later review or practice
 - **Adjustable Scale** — Zoom in or out to customize the visual experience
 - **Dark Theme Interface** — Eye-friendly dark interface with high-contrast cyan accents for comfortable long practice sessions
+
+<img width="1920" height="1080" alt="Снимок экрана 2026-03-12 150537" src="https://github.com/user-attachments/assets/b84399e8-0433-4259-bdee-0920addbbcca" />
 
 ## Download
 
