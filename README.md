@@ -1,4 +1,3 @@
-[README.md](https://github.com/user-attachments/files/25934918/README.md)
 # NoteFall-Piano
 
 <p align="center">
